@@ -12,6 +12,7 @@ const materialesRoutes   = require('./routes/materiales.routes');
 const balanceRoutes      = require('./routes/balance.routes');
 const suiRoutes          = require('./routes/sui.routes');
 const pqrRoutes          = require('./routes/pqr.routes');
+const vehiculosRoutes    = require('./routes/vehiculos.routes');
 
 const app = express();
 
@@ -53,6 +54,7 @@ app.use('/api/materiales',   materialesRoutes);
 app.use('/api/balance',      balanceRoutes);
 app.use('/api/sui',          suiRoutes);
 app.use('/api/pqr',          pqrRoutes);
+app.use('/api/vehiculos',    vehiculosRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((_req, res) => {

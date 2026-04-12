@@ -58,8 +58,28 @@ model Reciclador {
   updatedAt     DateTime         @updatedAt
 
   pesajes       Pesaje[]
+  vehiculos     Vehiculo[]
 
   @@map("recicladores")
+}
+
+// ─── Vehículos ────────────────────────────────────────────────────────────────
+
+model Vehiculo {
+  id            Int        @id @default(autoincrement())
+  identificador String     @unique  // e.g. "TRI-041"
+  tipo          String     // Camion, Carreta, Bicicleta, Otro
+  color         String
+  capacidadKg   Float
+  estado        String     @default("Activo")  // Activo, En mantenimiento, Inactivo
+  fechaRegistro DateTime   @default(now())
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  recicladorId  Int
+  reciclador    Reciclador @relation(fields: [recicladorId], references: [id])
+
+  @@map("vehiculos")
 }
 
 // ─── Rutas ────────────────────────────────────────────────────────────────────
