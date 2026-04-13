@@ -145,16 +145,42 @@ async function main() {
 
   // ─── Materiales y Precios ─────────────────────────────────────────────────
   const materialesData = [
-    { nombre: 'Cartón',     codigo: 'CAR-01', icono: '📦', precio: 320,  tendencia: 'subida'  },
-    { nombre: 'Papel',      codigo: 'PAP-01', icono: '📄', precio: 280,  tendencia: 'estable' },
-    { nombre: 'Plástico',   codigo: 'PLA-01', icono: '🧴', precio: 450,  tendencia: 'subida'  },
-    { nombre: 'Vidrio',     codigo: 'VID-01', icono: '🍶', precio: 120,  tendencia: 'bajada'  },
-    { nombre: 'Metales',    codigo: 'MET-01', icono: '⚙️', precio: 1200, tendencia: 'subida'  },
-    { nombre: 'Periódico',  codigo: 'PER-01', icono: '📰', precio: 150,  tendencia: 'bajada'  },
-    { nombre: 'Tetrapack',  codigo: 'TET-01', icono: '🥛', precio: 200,  tendencia: 'estable' },
-    { nombre: 'Otro',       codigo: 'OTR-01', icono: '🗑️', precio: 80,   tendencia: 'estable' },
+    // Metales
+    { nombre: 'Aluminio',           codigo: '101', icono: '🔩', precio: 1800, tendencia: 'subida'  },
+    { nombre: 'Chatarra',           codigo: '102', icono: '⚙️', precio: 400,  tendencia: 'estable' },
+    { nombre: 'Cobre',              codigo: '103', icono: '🔧', precio: 3500, tendencia: 'subida'  },
+    { nombre: 'Bronce',             codigo: '104', icono: '🔩', precio: 2800, tendencia: 'estable' },
+    { nombre: 'Antimonio',          codigo: '105', icono: '⚗️', precio: 900,  tendencia: 'bajada'  },
+    { nombre: 'Acero',              codigo: '106', icono: '🔩', precio: 600,  tendencia: 'estable' },
+    { nombre: 'Otros Metales',      codigo: '199', icono: '♻️', precio: 300,  tendencia: 'estable' },
+    // Papel y Cartón
+    { nombre: 'Archivo',            codigo: '201', icono: '📁', precio: 350,  tendencia: 'estable' },
+    { nombre: 'Cartón',             codigo: '202', icono: '📦', precio: 320,  tendencia: 'subida'  },
+    { nombre: 'Cubetas o Paneles',  codigo: '203', icono: '🗂️', precio: 200,  tendencia: 'estable' },
+    { nombre: 'Periódico',          codigo: '204', icono: '📰', precio: 150,  tendencia: 'bajada'  },
+    { nombre: 'Plegadiza',          codigo: '205', icono: '📦', precio: 280,  tendencia: 'estable' },
+    { nombre: 'Tetra Pack',         codigo: '206', icono: '🥛', precio: 200,  tendencia: 'estable' },
+    { nombre: 'Plastificado',       codigo: '207', icono: '📄', precio: 180,  tendencia: 'bajada'  },
+    { nombre: 'Kraft',              codigo: '208', icono: '📄', precio: 260,  tendencia: 'estable' },
+    { nombre: 'Otros Papel y Cartón', codigo: '299', icono: '♻️', precio: 120, tendencia: 'estable' },
+    // Plásticos
+    { nombre: 'Acrílico',          codigo: '301', icono: '🧪', precio: 380,  tendencia: 'estable' },
+    { nombre: 'Pasta',             codigo: '302', icono: '🧴', precio: 300,  tendencia: 'estable' },
+    { nombre: 'PET',               codigo: '303', icono: '🍶', precio: 500,  tendencia: 'subida'  },
+    { nombre: 'PVC',               codigo: '304', icono: '🧱', precio: 250,  tendencia: 'bajada'  },
+    { nombre: 'Plástico Blanco',   codigo: '305', icono: '🥛', precio: 420,  tendencia: 'subida'  },
+    { nombre: 'Polietileno',       codigo: '306', icono: '🧴', precio: 350,  tendencia: 'estable' },
+    { nombre: 'Soplado',           codigo: '307', icono: '🍶', precio: 310,  tendencia: 'estable' },
+    { nombre: 'Polipropileno',     codigo: '308', icono: '♻️', precio: 400,  tendencia: 'subida'  },
+    { nombre: 'Otros Plásticos',   codigo: '399', icono: '♻️', precio: 150,  tendencia: 'estable' },
+    // Vidrio
+    { nombre: 'Otros Vidrios',     codigo: '499', icono: '🍶', precio: 120,  tendencia: 'bajada'  },
+    // Textil
+    { nombre: 'Otros Textiles',    codigo: '599', icono: '🧵', precio: 200,  tendencia: 'estable' },
+    // Madera
+    { nombre: 'Otros Maderables',  codigo: '699', icono: '🪵', precio: 180,  tendencia: 'estable' },
   ];
-
+ 
   const materiales = [];
   for (const m of materialesData) {
     const mat = await prisma.material.create({
@@ -171,16 +197,18 @@ async function main() {
   }
 
   // ─── Compradores ──────────────────────────────────────────────────────────
-  const compradoresData = [
-    { empresa: 'Papelsa S.A.S',       materialNombre: 'Cartón',   precio: 340 },
-    { empresa: 'Papelsa S.A.S',       materialNombre: 'Papel',    precio: 290 },
-    { empresa: 'Ecoenvases Ltda',     materialNombre: 'Plástico', precio: 470 },
-    { empresa: 'Vidrios Colombia',    materialNombre: 'Vidrio',   precio: 130 },
-    { empresa: 'Chatarrerías Unidas', materialNombre: 'Metales',  precio: 1250 },
-    { empresa: 'Recupapel Ltda',      materialNombre: 'Periódico',precio: 160 },
-    { empresa: 'EcoPack S.A',         materialNombre: 'Tetrapack',precio: 210 },
+ const compradoresData = [
+    { empresa: 'Papelsa S.A.S',       materialNombre: 'Cartón',          precio: 340  },
+    { empresa: 'Papelsa S.A.S',       materialNombre: 'Archivo',         precio: 290  },
+    { empresa: 'Ecoenvases Ltda',     materialNombre: 'PET',             precio: 520  },
+    { empresa: 'Ecoenvases Ltda',     materialNombre: 'Plástico Blanco', precio: 440  },
+    { empresa: 'Vidrios Colombia',    materialNombre: 'Otros Vidrios',   precio: 130  },
+    { empresa: 'Chatarrerías Unidas', materialNombre: 'Aluminio',        precio: 1850 },
+    { empresa: 'Chatarrerías Unidas', materialNombre: 'Cobre',           precio: 3600 },
+    { empresa: 'Recupapel Ltda',      materialNombre: 'Periódico',       precio: 160  },
+    { empresa: 'EcoPack S.A',         materialNombre: 'Tetra Pack',      precio: 210  },
   ];
-
+ 
   for (const c of compradoresData) {
     const mat = materiales.find((m) => m.nombre === c.materialNombre);
     if (mat) {
@@ -189,8 +217,9 @@ async function main() {
       });
     }
   }
-
+ 
   console.log('✅ Materiales y compradores creados');
+ 
 
   // ─── Pesajes (últimos 30 días) ────────────────────────────────────────────
   const now = new Date();
@@ -240,22 +269,22 @@ async function main() {
   console.log(`✅ ${pesajesData.length} pesajes creados`);
 
   // ─── Balance de masas (meses recientes) ────────────────────────────────────
-  const balancesData = [
+   const balancesData = [
     // Febrero 2026
-    { anio: 2026, mes: 2, materialNombre: 'Cartón',    ingresado: 1800, vendido: 1680, rechazos: 120 },
-    { anio: 2026, mes: 2, materialNombre: 'Papel',     ingresado: 950,  vendido: 900,  rechazos: 50  },
-    { anio: 2026, mes: 2, materialNombre: 'Plástico',  ingresado: 620,  vendido: 580,  rechazos: 40  },
-    { anio: 2026, mes: 2, materialNombre: 'Vidrio',    ingresado: 420,  vendido: 390,  rechazos: 30  },
-    { anio: 2026, mes: 2, materialNombre: 'Metales',   ingresado: 380,  vendido: 360,  rechazos: 20  },
-    { anio: 2026, mes: 2, materialNombre: 'Periódico', ingresado: 200,  vendido: 190,  rechazos: 10  },
-    { anio: 2026, mes: 2, materialNombre: 'Tetrapack', ingresado: 150,  vendido: 100,  rechazos: 50  },
+    { anio: 2026, mes: 2, materialNombre: 'Cartón',        ingresado: 1800, vendido: 1680, rechazos: 120 },
+    { anio: 2026, mes: 2, materialNombre: 'Archivo',       ingresado: 950,  vendido: 900,  rechazos: 50  },
+    { anio: 2026, mes: 2, materialNombre: 'PET',           ingresado: 620,  vendido: 580,  rechazos: 40  },
+    { anio: 2026, mes: 2, materialNombre: 'Otros Vidrios', ingresado: 420,  vendido: 390,  rechazos: 30  },
+    { anio: 2026, mes: 2, materialNombre: 'Aluminio',      ingresado: 380,  vendido: 360,  rechazos: 20  },
+    { anio: 2026, mes: 2, materialNombre: 'Periódico',     ingresado: 200,  vendido: 190,  rechazos: 10  },
+    { anio: 2026, mes: 2, materialNombre: 'Tetra Pack',    ingresado: 150,  vendido: 100,  rechazos: 50  },
     // Enero 2026
-    { anio: 2026, mes: 1, materialNombre: 'Cartón',    ingresado: 1650, vendido: 1540, rechazos: 110 },
-    { anio: 2026, mes: 1, materialNombre: 'Papel',     ingresado: 870,  vendido: 820,  rechazos: 50  },
-    { anio: 2026, mes: 1, materialNombre: 'Plástico',  ingresado: 580,  vendido: 540,  rechazos: 40  },
-    { anio: 2026, mes: 1, materialNombre: 'Metales',   ingresado: 350,  vendido: 330,  rechazos: 20  },
+    { anio: 2026, mes: 1, materialNombre: 'Cartón',        ingresado: 1650, vendido: 1540, rechazos: 110 },
+    { anio: 2026, mes: 1, materialNombre: 'Archivo',       ingresado: 870,  vendido: 820,  rechazos: 50  },
+    { anio: 2026, mes: 1, materialNombre: 'PET',           ingresado: 580,  vendido: 540,  rechazos: 40  },
+    { anio: 2026, mes: 1, materialNombre: 'Aluminio',      ingresado: 350,  vendido: 330,  rechazos: 20  },
   ];
-
+ 
   for (const b of balancesData) {
     const mat = materiales.find((m) => m.nombre === b.materialNombre);
     if (mat) {
@@ -272,7 +301,7 @@ async function main() {
       });
     }
   }
-
+ 
   console.log('✅ Balances creados');
 
   // ─── Reportes SUI ─────────────────────────────────────────────────────────
