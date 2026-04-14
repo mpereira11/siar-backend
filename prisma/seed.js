@@ -13,6 +13,7 @@ async function main() {
   await prisma.balanceMes.deleteMany();
   await prisma.pesajeMaterial.deleteMany();
   await prisma.pesaje.deleteMany();
+  await prisma.vehiculo.deleteMany();
   await prisma.comprador.deleteMany();
   await prisma.precioMaterial.deleteMany();
   await prisma.material.deleteMany();
@@ -66,55 +67,67 @@ async function main() {
     prisma.ruta.create({
       data: {
         numero: 'R-01',
-        nombre: 'Norte Centro',
-        descripcion: 'Zona norte y centro de la ciudad',
-        barrios: ['Chapinero', 'Usaquén', 'Teusaquillo', 'Barrios Unidos', 'Engativá', 'Suba'],
+        nombre: 'Centro Histórico',
+        descripcion: 'Centro, La Catedral, Policarpa, La Paz, Cuatro Esquinas',
+        barrios: ['Centro', 'La Catedral', 'Policarpa', 'La Paz', 'Cuatro Esquinas'],
         estado: 'Activa',
+        lat: 5.0165,
+        lng: -74.0096,
       },
     }),
     prisma.ruta.create({
       data: {
         numero: 'R-02',
-        nombre: 'Sur Occidente',
-        descripcion: 'Zona sur occidental',
-        barrios: ['Kennedy', 'Bosa', 'Fontibón', 'Puente Aranda', 'Tunjuelito'],
+        nombre: 'Zona Norte',
+        descripcion: 'San Rafael, La Granja, Cundinamarca, Comuneros, Los Rosales',
+        barrios: ['San Rafael', 'La Granja', 'Cundinamarca', 'Comuneros', 'Los Rosales'],
         estado: 'Activa',
+        lat: 5.0285,
+        lng: -74.0085,
       },
     }),
     prisma.ruta.create({
       data: {
         numero: 'R-03',
-        nombre: 'Oriente',
-        descripcion: 'Zona oriental',
-        barrios: ['San Cristóbal', 'Usme', 'Rafael Uribe', 'Antonio Nariño', 'Los Mártires'],
+        nombre: 'Zona Sur',
+        descripcion: 'El Progreso, Villa Catalina, Luis Carlos Galán, San Martín, La Esperanza',
+        barrios: ['El Progreso', 'Villa Catalina', 'Luis Carlos Galán', 'San Martín', 'La Esperanza'],
         estado: 'Activa',
+        lat: 5.0045,
+        lng: -74.0110,
       },
     }),
     prisma.ruta.create({
       data: {
         numero: 'R-04',
-        nombre: 'Centro Histórico',
-        descripcion: 'Centro histórico y La Candelaria',
-        barrios: ['La Candelaria', 'Santa Fe', 'La Paz', 'Las Cruces', 'Lourdes', 'Egipto'],
-        estado: 'Parcial',
+        nombre: 'Zona Occidental',
+        descripcion: 'Marquetalia, Las Villas, Villa del Rey, El Tigre, Bosque Izquierdo',
+        barrios: ['Marquetalia', 'Las Villas', 'Villa del Rey', 'El Tigre', 'Bosque Izquierdo'],
+        estado: 'Activa',
+        lat: 5.0155,
+        lng: -74.0180,
       },
     }),
     prisma.ruta.create({
       data: {
         numero: 'R-05',
-        nombre: 'Occidental',
-        descripcion: 'Zona occidente',
-        barrios: ['Fontibón', 'Engativá Norte', 'Marsella', 'Álamos', 'Modelia', 'Tintal'],
+        nombre: 'Zona Oriental',
+        descripcion: 'San Isidro, El Carmen, Los Andes, Uval, Pasoancho',
+        barrios: ['San Isidro', 'El Carmen', 'Los Andes', 'Uval', 'Pasoancho'],
         estado: 'Activa',
+        lat: 5.0155,
+        lng: -73.9995,
       },
     }),
     prisma.ruta.create({
       data: {
         numero: 'R-06',
-        nombre: 'Sur Este',
-        descripcion: 'Zona sur este',
-        barrios: ['Ciudad Bolívar', 'Perdomo', 'Arborizadora', 'Lucero', 'Ismael Perdomo', 'Bellavista'],
+        nombre: 'Zona Industrial',
+        descripcion: 'Portachuelo, Obrero, La Florida, Bosque Derecho, El Cedro',
+        barrios: ['Portachuelo', 'Obrero', 'La Florida', 'Bosque Derecho', 'El Cedro'],
         estado: 'Activa',
+        lat: 5.0065,
+        lng: -74.0110,
       },
     }),
   ]);
@@ -420,6 +433,67 @@ async function main() {
   }
 
   console.log('✅ PQRs creadas');
+
+  // ─── Vehículos ────────────────────────────────────────────────────────────
+  await Promise.all([
+    prisma.vehiculo.create({
+      data: {
+        identificador: 'TRI-042',
+        tipo: 'Camion',
+        color: 'Verde',
+        capacidadKg: 150,
+        estado: 'Activo',
+        fechaRegistro: new Date('2025-01-15'),
+        recicladorId: recicladores[0].id, // José Luis Martínez
+      },
+    }),
+    prisma.vehiculo.create({
+      data: {
+        identificador: 'CAR-078',
+        tipo: 'Carreta',
+        color: 'Azul',
+        capacidadKg: 200,
+        estado: 'Activo',
+        fechaRegistro: new Date('2025-02-03'),
+        recicladorId: recicladores[1].id, // Ana Pérez
+      },
+    }),
+    prisma.vehiculo.create({
+      data: {
+        identificador: 'TRI-015',
+        tipo: 'Camion',
+        color: 'Rojo',
+        capacidadKg: 150,
+        estado: 'En mantenimiento',
+        fechaRegistro: new Date('2025-01-28'),
+        recicladorId: recicladores[2].id, // Carlos Ruiz
+      },
+    }),
+    prisma.vehiculo.create({
+      data: {
+        identificador: 'BIC-091',
+        tipo: 'Bicicleta',
+        color: 'Amarillo',
+        capacidadKg: 80,
+        estado: 'Activo',
+        fechaRegistro: new Date('2025-03-10'),
+        recicladorId: recicladores[3].id, // Laura Torres
+      },
+    }),
+    prisma.vehiculo.create({
+      data: {
+        identificador: 'CAM-064',
+        tipo: 'Camion',
+        color: 'Gris',
+        capacidadKg: 500,
+        estado: 'Activo',
+        fechaRegistro: new Date('2025-03-22'),
+        recicladorId: recicladores[6].id, // Pedro Álvarez
+      },
+    }),
+  ]);
+
+  console.log('✅ Vehículos creados');
 
   console.log('\n🎉 Seed completado exitosamente!');
   console.log('\n📋 Credenciales de acceso:');
