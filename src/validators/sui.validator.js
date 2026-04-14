@@ -28,4 +28,9 @@ const crearReporteSchema = z.object({
 
 const actualizarReporteSchema = crearReporteSchema.partial();
 
-module.exports = { crearReporteSchema, actualizarReporteSchema };
+const generarReporteSchema = z.object({
+  anio: z.number().int().min(2020).max(2099),
+  mes: z.number().int().min(1).max(12),
+});
+
+module.exports = { crearReporteSchema, actualizarReporteSchema, generarReporteSchema };
