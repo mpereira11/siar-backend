@@ -8,41 +8,84 @@ function getMesActual() {
 async function kpis(req, res) {
   try {
     const { anio, mes } = getMesActual();
-    const inicio = new Date(anio, mes - 1, 1);
-    const fin    = new Date(anio, mes, 1);
+    const inicio    = new Date(anio, mes - 1, 1);
+    const fin       = new Date(anio, mes,     1);
+    const inicioAnt = new Date(anio, mes - 2, 1); // JS maneja wrap automático (ej: enero → diciembre año anterior)
+    const finAnt    = new Date(anio, mes - 1, 1); // coincide con inicio del mes actual
 
-    const [pesajesMes, recicladoresActivos, pesajesMesDetalle] = await Promise.all([
-      prisma.pesajeMaterial.aggregate({
-        where: { pesaje: { horaEntrada: { gte: inicio, lt: fin }, estado: 'OK' } },
-        _sum: { pesoNeto: true, rechazo: true },
-      }),
-      prisma.reciclador.count({ where: { estado: 'Activa' } }),
-      prisma.pesajeMaterial.findMany({
-        where: { pesaje: { horaEntrada: { gte: inicio, lt: fin }, estado: 'OK' } },
+    const includeDetalle = {
+      material: {
         include: {
-          material: {
-            include: {
-              precios: { where: { vigenciaHasta: null }, orderBy: { vigenciaDesde: 'desc' }, take: 1 },
-            },
-          },
+          precios: { where: { vigenciaHasta: null }, orderBy: { vigenciaDesde: 'desc' }, take: 1 },
         },
-      }),
+      },
+    };
+
+    const [
+      [pesajesMes,    recicladoresActivos, pesajesMesDetalle],
+      [pesajesMesAnt, recicladoresAnt,     pesajesMesDetalleAnt],
+    ] = await Promise.all([
+      Promise.all([
+        prisma.pesajeMaterial.aggregate({
+          where: { pesaje: { horaEntrada: { gte: inicio,    lt: fin    }, estado: 'OK' } },
+          _sum: { pesoNeto: true, rechazo: true },
+        }),
+        prisma.reciclador.count({
+          where: { estado: 'Activa', pesajes: { some: { horaEntrada: { gte: inicio,    lt: fin    }, estado: 'OK' } } },
+        }),
+        prisma.pesajeMaterial.findMany({
+          where: { pesaje: { horaEntrada: { gte: inicio,    lt: fin    }, estado: 'OK' } },
+          include: includeDetalle,
+        }),
+      ]),
+      Promise.all([
+        prisma.pesajeMaterial.aggregate({
+          where: { pesaje: { horaEntrada: { gte: inicioAnt, lt: finAnt }, estado: 'OK' } },
+          _sum: { pesoNeto: true, rechazo: true },
+        }),
+        prisma.reciclador.count({
+          where: { estado: 'Activa', pesajes: { some: { horaEntrada: { gte: inicioAnt, lt: finAnt }, estado: 'OK' } } },
+        }),
+        prisma.pesajeMaterial.findMany({
+          where: { pesaje: { horaEntrada: { gte: inicioAnt, lt: finAnt }, estado: 'OK' } },
+          include: includeDetalle,
+        }),
+      ]),
     ]);
 
+    // ── Valores mes actual ──────────────────────────────────────────────────
     const rechazos    = Number(pesajesMes._sum.rechazo  ?? 0);
     const aprovechado = Number(pesajesMes._sum.pesoNeto ?? 0) - rechazos;
-
-    const liquidado = pesajesMesDetalle.reduce((acc, pm) => {
+    const liquidado   = pesajesMesDetalle.reduce((acc, pm) => {
       const precio            = Number(pm.material.precios[0]?.precio ?? 0);
       const kgComercializable = Number(pm.pesoNeto ?? 0) - Number(pm.rechazo ?? 0);
       return acc + (kgComercializable > 0 ? kgComercializable * precio : 0);
     }, 0);
 
+    // ── Valores mes anterior ────────────────────────────────────────────────
+    const rechazosAnt    = Number(pesajesMesAnt._sum.rechazo  ?? 0);
+    const aprovechadoAnt = Number(pesajesMesAnt._sum.pesoNeto ?? 0) - rechazosAnt;
+    const liquidadoAnt   = pesajesMesDetalleAnt.reduce((acc, pm) => {
+      const precio            = Number(pm.material.precios[0]?.precio ?? 0);
+      const kgComercializable = Number(pm.pesoNeto ?? 0) - Number(pm.rechazo ?? 0);
+      return acc + (kgComercializable > 0 ? kgComercializable * precio : 0);
+    }, 0);
+
+    // ── Helper delta ────────────────────────────────────────────────────────
+    const calcDelta = (actual, anterior) => {
+      if (anterior === 0) return { delta: 'Nuevo', dir: 'up' };
+      const pct     = ((actual - anterior) / anterior) * 100;
+      const rounded = Math.round(pct);
+      const dir     = rounded >= 0 ? 'up' : 'down';
+      const sign    = rounded >= 0 ? '+' : '';
+      return { delta: `${sign}${rounded}%`, dir };
+    };
+
     res.json({
-      aprovechado:        { valor: aprovechado,                   unidad: 'kg',  delta: '+8%',  dir: 'up'   },
-      recicladoresActivos:{ valor: recicladoresActivos,            delta: '0',    dir: 'up'                  },
-      rechazos:           { valor: rechazos,                      unidad: 'kg',  delta: '-3%',  dir: 'down' },
-      liquidado:          { valor: Math.round(liquidado),         unidad: 'COP', delta: '+12%', dir: 'up'   },
+      aprovechado:         { valor: aprovechado,           unidad: 'kg',  ...calcDelta(aprovechado,        aprovechadoAnt)  },
+      recicladoresActivos: { valor: recicladoresActivos,                  ...calcDelta(recicladoresActivos, recicladoresAnt) },
+      rechazos:            { valor: rechazos,              unidad: 'kg',  ...calcDelta(rechazos,            rechazosAnt)     },
+      liquidado:           { valor: Math.round(liquidado), unidad: 'COP', ...calcDelta(liquidado,           liquidadoAnt)    },
     });
   } catch (err) {
     console.error('[dashboard.kpis]', err);
@@ -111,12 +154,14 @@ async function composicionMaterial(req, res) {
 
     const total = Array.from(por_material_map.values()).reduce((acc, m) => acc + m.kg, 0);
 
-    const composicion = Array.from(por_material_map.values()).map((m) => ({
-      nombre:      m.nombre,
-      icono:       m.icono ?? '♻️',
-      kg:          m.kg,
-      porcentaje:  total > 0 ? +((m.kg / total) * 100).toFixed(1) : 0,
-    }));
+    const composicion = Array.from(por_material_map.values())
+      .sort((a, b) => b.kg - a.kg)
+      .map((m) => ({
+        nombre:      m.nombre,
+        icono:       m.icono ?? '♻️',
+        kg:          m.kg,
+        porcentaje:  total > 0 ? +((m.kg / total) * 100).toFixed(1) : 0,
+      }));
 
     res.json({ total, composicion });
   } catch (err) {
