@@ -96,6 +96,8 @@ model Ruta {
   nombre        String
   descripcion   String?
   barrios       String[]   // lista de nombres de barrios
+  lat           Float?     // latitud del centro de la ruta (opcional)
+  lng           Float?     // longitud del centro de la ruta (opcional)
   estado        EstadoRuta @default(Activa)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
