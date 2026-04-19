@@ -4,15 +4,16 @@ const authMiddleware = require('../middleware/auth.middleware');
 const { requireRoles } = require('../middleware/roles.middleware');
 const { validate } = require('../middleware/validate.middleware');
 const { crearRecicladorSchema, actualizarRecicladorSchema, listQuerySchema } = require('../validators/recicladores.validator');
+const { cacheMiddleware } = require('../lib/cache');
 
 const router = Router();
 
 router.use(authMiddleware);
 
-router.get('/',                validate(listQuerySchema, 'query'), listar);
-router.get('/:id',             obtener);
-router.get('/:id/historial',   historial);
-router.get('/:id/cuenta-cobro', cuentaCobro);
+router.get('/',                validate(listQuerySchema, 'query'), cacheMiddleware(5 * 60 * 1000), listar);
+router.get('/:id',             cacheMiddleware(5 * 60 * 1000), obtener);
+router.get('/:id/historial',   cacheMiddleware(2 * 60 * 1000), historial);
+router.get('/:id/cuenta-cobro', cacheMiddleware(2 * 60 * 1000), cuentaCobro);
 
 router.post(
   '/',

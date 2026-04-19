@@ -1,4 +1,10 @@
 require('dotenv').config();
+
+const REQUIRED_ENV = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'DATABASE_URL'];
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) throw new Error(`Falta variable de entorno requerida: ${key}`);
+}
+
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -51,7 +57,7 @@ const cacheControl = (segundos) => (req, res, next) => {
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), env: process.env.NODE_ENV });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // ─── Rutas API ────────────────────────────────────────────────────────────────
@@ -96,4 +102,23 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🌿 SIAR Backend corriendo en http://0.0.0.0:${PORT}`);
   console.log(`   Entorno: ${process.env.NODE_ENV || 'development'}`);
   console.log(`   Health:  http://0.0.0.0:${PORT}/health\n`);
+
+  // Warm-up diferido: espera 5s para que el pool de conexiones esté listo
+  setTimeout(warmUp, 5000);
 });
+
+async function warmUp() {
+  const { warmSet } = require('./lib/cache');
+  const { computeKpis, computeActividad, computeComposicion, computeTendencia } = require('./controllers/dashboard.controller');
+  try {
+    // Secuencial para no saturar el pool de Supabase
+    const kpisData   = await computeKpis();
+    const actividad  = await computeActividad();
+    const composicion = await computeComposicion();
+    const tendencia  = await computeTendencia();
+    warmSet('/api/dashboard/all', { kpis: kpisData, actividad, composicion, tendencia }, 5 * 60_000);
+    console.log('   Cache warm-up: /dashboard/all ✓');
+  } catch (err) {
+    console.warn('   Cache warm-up falló (no crítico):', err.message);
+  }
+}

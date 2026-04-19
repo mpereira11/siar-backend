@@ -2,6 +2,10 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 
+// Blacklist de refresh tokens revocados (en memoria).
+// En producción con múltiples instancias usar Redis.
+const revokedTokens = new Set();
+
 function signToken(payload) {
   return jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '8h',
@@ -54,6 +58,9 @@ async function login(req, res) {
 async function refresh(req, res) {
   const { refreshToken } = req.body;
   try {
+    if (revokedTokens.has(refreshToken)) {
+      return res.status(401).json({ error: 'Token inválido' });
+    }
     const payload = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
     const usuario = await prisma.usuario.findUnique({ where: { id: payload.sub } });
     if (!usuario || !usuario.activo) {
@@ -75,9 +82,9 @@ async function me(req, res) {
   res.json(usuario);
 }
 
-function logout(_req, res) {
-  // Con JWT stateless el cliente simplemente descarta el token.
-  // Aquí se puede implementar una blacklist si se requiere.
+function logout(req, res) {
+  const { refreshToken } = req.body ?? {};
+  if (refreshToken) revokedTokens.add(refreshToken);
   res.json({ mensaje: 'Sesión cerrada correctamente' });
 }
 

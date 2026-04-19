@@ -91,46 +91,50 @@ async function kpis(req, res) {
     console.error('[dashboard.kpis]', err);
     res.status(500).json({ error: 'Error al obtener KPIs' });
   }
+
+  const total = Array.from(map.values()).reduce((acc, m) => acc + m.kg, 0);
+  return {
+    total,
+    composicion: Array.from(map.values()).map((m) => ({
+      nombre: m.nombre, icono: m.icono ?? '♻️', kg: m.kg,
+      porcentaje: total > 0 ? +((m.kg / total) * 100).toFixed(1) : 0,
+    })),
+  };
 }
 
-async function actividadReciente(req, res) {
-  try {
-    const pesajes = await prisma.pesaje.findMany({
-      take: 8,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        reciclador: { select: { nombre: true, codigo: true } },
-        materiales: { include: { material: { select: { nombre: true, icono: true } } } },
-      },
-    });
+async function computeTendencia() {
+  const hoy   = new Date();
+  const inicio = new Date(hoy);
+  inicio.setDate(hoy.getDate() - 7 * 8);
+  inicio.setHours(0, 0, 0, 0);
 
-    const actividad = pesajes.map((p) => {
-      const pesoTotal = p.materiales.reduce((acc, m) => acc + Number(m.pesoNeto), 0);
-      const iniciales = p.reciclador.nombre
-        .split(' ').slice(0, 2).map((n) => n[0]).join('');
-      return {
-        initials:  iniciales,
-        nombre:    p.reciclador.nombre,
-        codigo:    p.reciclador.codigo,
-        materiales:p.materiales.map((m) => m.material.nombre).join(', '),
-        kg:        pesoTotal.toFixed(1),
-        hora:      p.horaEntrada,
-        estado:    p.estado,
-      };
-    });
+  const pesajes = await prisma.pesajeMaterial.findMany({
+    where: { pesaje: { horaEntrada: { gte: inicio }, estado: 'OK' } },
+    select: { pesoNeto: true, pesaje: { select: { horaEntrada: true } } },
+  });
 
-    res.json(actividad);
-  } catch (err) {
-    console.error('[dashboard.actividadReciente]', err);
-    res.status(500).json({ error: 'Error al obtener actividad reciente' });
+  const semanas = Array.from({ length: 8 }, (_, i) => {
+    const fin = new Date(hoy); fin.setDate(hoy.getDate() - i * 7);
+    const ini = new Date(fin); ini.setDate(fin.getDate() - 6); ini.setHours(0, 0, 0, 0);
+    fin.setHours(23, 59, 59, 999);
+    return { label: `S${8 - i}`, kg: 0, inicio: ini, fin,
+             inicioStr: ini.toISOString().slice(0, 10), finStr: fin.toISOString().slice(0, 10) };
+  }).reverse();
+
+  for (const pm of pesajes) {
+    const fecha = new Date(pm.pesaje.horaEntrada);
+    const sem   = semanas.find((s) => fecha >= s.inicio && fecha <= s.fin);
+    if (sem) sem.kg += Number(pm.pesoNeto ?? 0);
   }
+
+  return semanas.map((s) => ({ label: s.label, kg: s.kg, inicio: s.inicioStr, fin: s.finStr }));
 }
 
-async function composicionMaterial(req, res) {
-  try {
-    const { anio, mes } = getMesActual();
-    const inicio = new Date(anio, mes - 1, 1);
-    const fin    = new Date(anio, mes, 1);
+// ─── Handlers individuales (mantienen compatibilidad) ─────────────────────────
+async function kpis(_req, res) {
+  try { res.json(await computeKpis()) }
+  catch (err) { console.error('[dashboard.kpis]', err); res.status(500).json({ error: 'Error al obtener KPIs' }) }
+}
 
     // Una sola query con JOIN en lugar de dos queries separadas
     const composicion_raw = await prisma.pesajeMaterial.findMany({
@@ -170,63 +174,30 @@ async function composicionMaterial(req, res) {
   }
 }
 
-// ─── OPTIMIZADO: 1 sola query agrupada en lugar de 8 queries secuenciales ─────
-async function tendenciaSemanal(req, res) {
+async function composicionMaterial(_req, res) {
+  try { res.json(await computeComposicion()) }
+  catch (err) { console.error('[dashboard.composicionMaterial]', err); res.status(500).json({ error: 'Error al obtener composición' }) }
+}
+
+async function tendenciaSemanal(_req, res) {
+  try { res.json(await computeTendencia()) }
+  catch (err) { console.error('[dashboard.tendenciaSemanal]', err); res.status(500).json({ error: 'Error al obtener tendencia semanal' }) }
+}
+
+// ─── Endpoint combinado: 1 request = todos los datos del dashboard ─────────────
+async function all(_req, res) {
   try {
-    const hoy = new Date();
-    // Inicio de la semana 1 (hace 7 semanas)
-    const inicio = new Date(hoy);
-    inicio.setDate(hoy.getDate() - 7 * 8);
-    inicio.setHours(0, 0, 0, 0);
-
-    // Una sola query trae todos los pesajes de las últimas 8 semanas
-    const pesajes = await prisma.pesajeMaterial.findMany({
-      where: {
-        pesaje: {
-          horaEntrada: { gte: inicio },
-          estado: 'OK',
-        },
-      },
-      select: {
-        pesoNeto: true,
-        pesaje: { select: { horaEntrada: true } },
-      },
-    });
-
-    // Agrupar en JavaScript por semana relativa
-    const semanas = Array.from({ length: 8 }, (_, i) => {
-      const finSemana   = new Date(hoy);
-      finSemana.setDate(hoy.getDate() - i * 7);
-      const inicioSemana = new Date(finSemana);
-      inicioSemana.setDate(finSemana.getDate() - 6);
-      inicioSemana.setHours(0, 0, 0, 0);
-      finSemana.setHours(23, 59, 59, 999);
-      return {
-        label:  `S${8 - i}`,
-        kg:     0,
-        inicio: inicioSemana,
-        fin:    finSemana,
-        inicioStr: inicioSemana.toISOString().slice(0, 10),
-        finStr:    finSemana.toISOString().slice(0, 10),
-      };
-    }).reverse();
-
-    for (const pm of pesajes) {
-      const fecha = new Date(pm.pesaje.horaEntrada);
-      const semana = semanas.find(s => fecha >= s.inicio && fecha <= s.fin);
-      if (semana) semana.kg += Number(pm.pesoNeto ?? 0);
-    }
-
-    res.json(semanas.map(s => ({
-      label:  s.label,
-      kg:     s.kg,
-      inicio: s.inicioStr,
-      fin:    s.finStr,
-    })));
+    const [kpisData, actividad, composicion, tendencia] = await Promise.all([
+      computeKpis(),
+      computeActividad(),
+      computeComposicion(),
+      computeTendencia(),
+    ]);
+    res.json({ kpis: kpisData, actividad, composicion, tendencia });
   } catch (err) {
-    console.error('[dashboard.tendenciaSemanal]', err);
-    res.status(500).json({ error: 'Error al obtener tendencia semanal' });
+    console.error('[dashboard.all]', err);
+    res.status(500).json({ error: 'Error al obtener dashboard' });
   }
 }
 
-module.exports = { kpis, actividadReciente, composicionMaterial, tendenciaSemanal };
+module.exports = { kpis, actividadReciente, composicionMaterial, tendenciaSemanal, all, computeKpis, computeActividad, computeComposicion, computeTendencia };

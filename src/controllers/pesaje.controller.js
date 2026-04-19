@@ -1,4 +1,5 @@
 const prisma = require('../lib/prisma');
+const { invalidate } = require('../lib/cache');
 
 async function listar(req, res) {
   try {
@@ -164,6 +165,8 @@ async function crear(req, res) {
       },
     });
 
+    invalidate('/api/dashboard');
+    invalidate('/api/rutas');
     res.status(201).json(pesaje);
   } catch (err) {
     console.error('[pesaje.crear]', err);

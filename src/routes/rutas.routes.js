@@ -4,14 +4,16 @@ const authMiddleware = require('../middleware/auth.middleware');
 const { requireRoles } = require('../middleware/roles.middleware');
 const { validate } = require('../middleware/validate.middleware');
 const { crearRutaSchema, actualizarRutaSchema } = require('../validators/rutas.validator');
+const { cacheMiddleware, invalidate } = require('../lib/cache');
 
 const router = Router();
 
 router.use(authMiddleware);
 
-router.get('/',         listar);
-router.get('/cobertura', resumenCobertura);
-router.get('/:id',      obtener);
+// Rutas cambian muy poco — caché de 5 minutos
+router.get('/',          cacheMiddleware(5 * 60 * 1000), listar);
+router.get('/cobertura', cacheMiddleware(5 * 60 * 1000), resumenCobertura);
+router.get('/:id',       cacheMiddleware(5 * 60 * 1000), obtener);
 
 router.post(
   '/',

@@ -1,4 +1,5 @@
 const prisma = require('../lib/prisma');
+const { invalidate } = require('../lib/cache');
 
 async function listar(_req, res) {
   const materiales = await prisma.material.findMany({
@@ -45,6 +46,7 @@ async function crear(req, res) {
   if (existe) return res.status(409).json({ error: `El código ${req.body.codigo} ya existe` });
 
   const material = await prisma.material.create({ data: req.body });
+  invalidate('/api/materiales');
   res.status(201).json(material);
 }
 
@@ -71,6 +73,8 @@ async function actualizarPrecio(req, res) {
     },
   });
 
+  invalidate('/api/materiales');
+  invalidate('/api/dashboard');
   res.json({ material: { id, nombre: material.nombre }, nuevoPrecio });
 }
 
@@ -105,6 +109,7 @@ async function crearComprador(req, res) {
     include: { material: { select: { nombre: true, codigo: true } } },
   });
 
+  invalidate('/api/materiales');
   res.status(201).json(comprador);
 }
 
