@@ -1,288 +1,281 @@
-const prisma = require('../lib/prisma');
+const supabase = require('../lib/supabase');
+const { invalidate } = require('../lib/cache');
 
 async function listar(req, res) {
-  const { rutaId, estado, q, page, limit } = req.query;
+  try {
+    const { rutaId, estado, q } = req.query;
+    const p   = Math.max(1, Number(req.query.page)  || 1);
+    const lim = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+    const from = (p - 1) * lim;
+    const to   = from + lim - 1;
 
-  const where = {};
-  if (rutaId) where.rutaId = Number(rutaId);
-  if (estado) where.estado = estado;
-  if (q) {
-    where.OR = [
-      { nombre: { contains: q, mode: 'insensitive' } },
-      { codigo: { contains: q, mode: 'insensitive' } },
-    ];
-  }
+    const hoy = new Date();
+    const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
+    const inicioSem = new Date(hoy);
+    inicioSem.setDate(hoy.getDate() - hoy.getDay());
+    inicioSem.setHours(0, 0, 0, 0);
 
-  const skip = (page - 1) * limit;
+    let query = supabase
+      .from('recicladores')
+      .select('id, codigo, nombre, estado, color, telefono, rutaId, rutas!rutaId(id, numero, nombre)', { count: 'exact' })
+      .order('nombre', { ascending: true })
+      .range(from, to);
 
-  const [total, recicladores] = await Promise.all([
-    prisma.reciclador.count({ where }),
-    prisma.reciclador.findMany({
-      where,
-      skip,
-      take: Number(limit),
-      orderBy: { nombre: 'asc' },
-      include: {
-        ruta: { select: { id: true, numero: true, nombre: true } },
-        _count: { select: { pesajes: true } },
-      },
-    }),
-  ]);
+    if (rutaId) query = query.eq('rutaId', Number(rutaId));
+    if (estado) query = query.eq('estado', estado);
+    if (q)      query = query.or(`nombre.ilike.%${q}%,codigo.ilike.%${q}%`);
 
-  // Agregar kg del mes actual
-  const hoy = new Date();
-  const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    const { data: recicladores, count, error } = await query;
+    if (error) throw error;
+    if (!recicladores?.length)
+      return res.json({ data: [], meta: { total: 0, page: p, limit: lim, pages: 0 } });
 
-  const kgPorReciclador = await prisma.pesajeMaterial.groupBy({
-    by: ['pesajeId'],
-    where: {
-      pesaje: {
-        recicladorId: { in: recicladores.map((r) => r.id) },
-        horaEntrada: { gte: inicioMes },
-        estado: 'OK',
-      },
-    },
-    _sum: { pesoNeto: true },
-  });
+    const ids = recicladores.map((r) => r.id);
 
-  // Necesitamos mapear pesajeId → recicladorId
-  const pesajesIds = kgPorReciclador.map((k) => k.pesajeId);
-  const pesajes = pesajesIds.length
-    ? await prisma.pesaje.findMany({
-        where: { id: { in: pesajesIds } },
-        select: { id: true, recicladorId: true },
-      })
-    : [];
+    const [{ data: kgMesRaw }, { data: pesajesSemana }, { data: pesajesCount }] = await Promise.all([
+      // kg este mes
+      supabase
+        .from('pesaje_materiales')
+        .select('pesoNeto, pesajes!pesajeId(recicladorId, horaEntrada, estado)')
+        .gte('pesajes.horaEntrada', inicioMes)
+        .eq('pesajes.estado', 'OK')
+        .in('pesajes.recicladorId', ids),
 
-  const kgMap = {};
-  for (const k of kgPorReciclador) {
-    const p = pesajes.find((pe) => pe.id === k.pesajeId);
-    if (p) {
-      kgMap[p.recicladorId] = (kgMap[p.recicladorId] ?? 0) + Number(k._sum.pesoNeto ?? 0);
+      // ingreso semanal — necesita precio vigente
+      supabase
+        .from('pesajes')
+        .select(`
+          recicladorId,
+          pesaje_materiales(pesoNeto, rechazo,
+            materiales!materialId(precios_material(precio, vigenciaHasta)))
+        `)
+        .gte('horaEntrada', inicioSem.toISOString())
+        .eq('estado', 'OK')
+        .in('recicladorId', ids),
+
+      // conteo total pesajes
+      supabase
+        .from('pesajes')
+        .select('recicladorId')
+        .in('recicladorId', ids),
+    ]);
+
+    const kgMesMap = {};
+    for (const pm of kgMesRaw ?? []) {
+      const recId = pm.pesajes?.recicladorId;
+      if (recId) kgMesMap[recId] = (kgMesMap[recId] ?? 0) + Number(pm.pesoNeto ?? 0);
     }
-  }
 
-  // Ingreso económico de la semana actual
-  const inicioSemana = new Date(hoy);
-  inicioSemana.setDate(hoy.getDate() - hoy.getDay());
-  inicioSemana.setHours(0, 0, 0, 0);
-
-  const pesajesSemana = recicladores.length
-    ? await prisma.pesaje.findMany({
-        where: {
-          recicladorId: { in: recicladores.map((r) => r.id) },
-          horaEntrada: { gte: inicioSemana },
-          estado: 'OK',
-        },
-        include: {
-          materiales: {
-            include: {
-              material: {
-                include: {
-                  precios: { where: { vigenciaHasta: null }, orderBy: { vigenciaDesde: 'desc' }, take: 1 },
-                },
-              },
-            },
-          },
-        },
-      })
-    : [];
-
-  const ingresoSemanaMap = {};
-  for (const p of pesajesSemana) {
-    for (const pm of p.materiales) {
-      const precio = Number(pm.material.precios[0]?.precio ?? 0);
-      const kg = Number(pm.pesoNeto ?? 0) - Number(pm.rechazo ?? 0);
-      ingresoSemanaMap[p.recicladorId] = (ingresoSemanaMap[p.recicladorId] ?? 0) + (kg > 0 ? kg * precio : 0);
+    const ingresoSemMap = {};
+    for (const p of pesajesSemana ?? []) {
+      for (const pm of p.pesaje_materiales ?? []) {
+        const vigente = (pm.materiales?.precios_material ?? [])
+          .filter((x) => !x.vigenciaHasta)
+          .sort((a, b) => new Date(b.vigenciaDesde) - new Date(a.vigenciaDesde))[0];
+        const precio = Number(vigente?.precio ?? 0);
+        const kg = Number(pm.pesoNeto ?? 0) - Number(pm.rechazo ?? 0);
+        if (kg > 0)
+          ingresoSemMap[p.recicladorId] = (ingresoSemMap[p.recicladorId] ?? 0) + kg * precio;
+      }
     }
+
+    const conteoMap = {};
+    for (const p of pesajesCount ?? [])
+      conteoMap[p.recicladorId] = (conteoMap[p.recicladorId] ?? 0) + 1;
+
+    const data = recicladores.map((r) => ({
+      ...r,
+      kgMes:        kgMesMap[r.id] ?? 0,
+      totalPesajes: conteoMap[r.id] ?? 0,
+      ingresoSemana: ingresoSemMap[r.id] ?? 0,
+    }));
+
+    res.json({ data, meta: { total: count ?? 0, page: p, limit: lim, pages: Math.ceil((count ?? 0) / lim) } });
+  } catch (err) {
+    console.error('[recicladores.listar]', err);
+    res.status(500).json({ error: 'Error al listar recicladores' });
   }
-
-  const data = recicladores.map((r) => ({
-    ...r,
-    kgMes: kgMap[r.id] ?? 0,
-    totalPesajes: r._count.pesajes,
-    ingresoSemana: ingresoSemanaMap[r.id] ?? 0,
-    _count: undefined,
-  }));
-
-  res.json({
-    data,
-    meta: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
-  });
 }
 
 async function obtener(req, res) {
-  const id = Number(req.params.id);
-  const reciclador = await prisma.reciclador.findUnique({
-    where: { id },
-    include: {
-      ruta: true,
-      usuario: { select: { id: true, email: true, activo: true } },
-    },
-  });
+  try {
+    const id = Number(req.params.id);
+    const hoy = new Date();
+    const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
 
-  if (!reciclador) return res.status(404).json({ error: 'Reciclador no encontrado' });
+    const [
+      { data: reciclador, error },
+      { data: matMes },
+      { count: visitasMes },
+      { data: pesajesRecientes },
+    ] = await Promise.all([
+      supabase
+        .from('recicladores')
+        .select('*, rutas!rutaId(*), usuarios!usuarioId(id, email, activo)')
+        .eq('id', id)
+        .single(),
+      supabase
+        .from('pesajes')
+        .select('pesaje_materiales(pesoNeto)')
+        .eq('recicladorId', id)
+        .gte('horaEntrada', inicioMes)
+        .eq('estado', 'OK'),
+      supabase
+        .from('pesajes')
+        .select('id', { count: 'exact', head: true })
+        .eq('recicladorId', id)
+        .gte('horaEntrada', inicioMes),
+      supabase
+        .from('pesajes')
+        .select(`
+          *,
+          rutas!rutaId(numero, nombre),
+          pesaje_materiales(*, materiales!materialId(nombre, icono))
+        `)
+        .eq('recicladorId', id)
+        .order('horaEntrada', { ascending: false })
+        .limit(10),
+    ]);
 
-  // Estadísticas del mes
-  const hoy = new Date();
-  const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    if (error || !reciclador) return res.status(404).json({ error: 'Reciclador no encontrado' });
 
-  const [kgMes, visitasMes, pesajesRecientes] = await Promise.all([
-    prisma.pesajeMaterial.aggregate({
-      where: {
-        pesaje: { recicladorId: id, horaEntrada: { gte: inicioMes }, estado: 'OK' },
-      },
-      _sum: { pesoNeto: true },
-    }),
-    prisma.pesaje.count({
-      where: { recicladorId: id, horaEntrada: { gte: inicioMes } },
-    }),
-    prisma.pesaje.findMany({
-      where: { recicladorId: id },
-      take: 10,
-      orderBy: { horaEntrada: 'desc' },
-      include: {
-        materiales: { include: { material: { select: { nombre: true, icono: true } } } },
-        ruta: { select: { numero: true, nombre: true } },
-      },
-    }),
-  ]);
+    const kgMes = (matMes ?? []).reduce((acc, p) =>
+      acc + (p.pesaje_materiales ?? []).reduce((s, m) => s + Number(m.pesoNeto ?? 0), 0), 0);
 
-  res.json({
-    ...reciclador,
-    estadisticas: {
-      kgMes: Number(kgMes._sum.pesoNeto ?? 0),
-      visitasMes,
-    },
-    actividadReciente: pesajesRecientes,
-  });
+    res.json({
+      ...reciclador,
+      estadisticas: { kgMes, visitasMes: visitasMes ?? 0 },
+      actividadReciente: pesajesRecientes ?? [],
+    });
+  } catch (err) {
+    console.error('[recicladores.obtener]', err);
+    res.status(500).json({ error: 'Error al obtener reciclador' });
+  }
 }
 
 async function crear(req, res) {
-  // Generar código único
-  const ultimo = await prisma.reciclador.findFirst({ orderBy: { id: 'desc' } });
-  const nuevoNum = (ultimo ? parseInt(ultimo.codigo.split('-')[1]) + 1 : 1)
-    .toString()
-    .padStart(4, '0');
-  const codigo = `ID-${nuevoNum}`;
+  try {
+    const { data: ultimo } = await supabase
+      .from('recicladores')
+      .select('codigo')
+      .order('id', { ascending: false })
+      .limit(1)
+      .single();
 
-  const reciclador = await prisma.reciclador.create({
-    data: { ...req.body, codigo },
-    include: { ruta: true },
-  });
+    const nuevoNum = (ultimo ? parseInt(ultimo.codigo.split('-')[1]) + 1 : 1)
+      .toString().padStart(4, '0');
 
-  res.status(201).json(reciclador);
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('recicladores')
+      .insert({ ...req.body, codigo: `ID-${nuevoNum}`, createdAt: now, updatedAt: now })
+      .select('*, rutas!rutaId(*)')
+      .single();
+
+    if (error) throw error;
+    invalidate('/api/recicladores');
+    invalidate('/api/dashboard');
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('[recicladores.crear]', err);
+    res.status(500).json({ error: 'Error al crear reciclador' });
+  }
 }
 
 async function actualizar(req, res) {
-  const id = Number(req.params.id);
-  const existe = await prisma.reciclador.findUnique({ where: { id } });
-  if (!existe) return res.status(404).json({ error: 'Reciclador no encontrado' });
+  try {
+    const { data, error } = await supabase
+      .from('recicladores')
+      .update(req.body)
+      .eq('id', Number(req.params.id))
+      .select('*, rutas!rutaId(*)')
+      .single();
 
-  const reciclador = await prisma.reciclador.update({
-    where: { id },
-    data: req.body,
-    include: { ruta: true },
-  });
-
-  res.json(reciclador);
+    if (error || !data) return res.status(404).json({ error: 'Reciclador no encontrado' });
+    invalidate('/api/recicladores');
+    res.json(data);
+  } catch (err) {
+    console.error('[recicladores.actualizar]', err);
+    res.status(500).json({ error: 'Error al actualizar reciclador' });
+  }
 }
 
 async function historial(req, res) {
-  const id = Number(req.params.id);
-  const { page = 1, limit = 20 } = req.query;
+  try {
+    const id  = Number(req.params.id);
+    const p   = Math.max(1, Number(req.query.page)  || 1);
+    const lim = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+    const from = (p - 1) * lim;
+    const to   = from + lim - 1;
 
-  const existe = await prisma.reciclador.findUnique({ where: { id } });
-  if (!existe) return res.status(404).json({ error: 'Reciclador no encontrado' });
+    const { data, count, error } = await supabase
+      .from('pesajes')
+      .select(`
+        *, rutas!rutaId(numero, nombre),
+        pesaje_materiales(*, materiales!materialId(nombre, icono, codigo))
+      `, { count: 'exact' })
+      .eq('recicladorId', id)
+      .order('horaEntrada', { ascending: false })
+      .range(from, to);
 
-  const skip = (Number(page) - 1) * Number(limit);
-
-  const [total, pesajes] = await Promise.all([
-    prisma.pesaje.count({ where: { recicladorId: id } }),
-    prisma.pesaje.findMany({
-      where: { recicladorId: id },
-      skip,
-      take: Number(limit),
-      orderBy: { horaEntrada: 'desc' },
-      include: {
-        ruta: { select: { numero: true, nombre: true } },
-        materiales: {
-          include: { material: { select: { nombre: true, icono: true, codigo: true } } },
-        },
-      },
-    }),
-  ]);
-
-  res.json({
-    data: pesajes,
-    meta: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
-  });
+    if (error) throw error;
+    res.json({ data: data ?? [], meta: { total: count ?? 0, page: p, limit: lim, pages: Math.ceil((count ?? 0) / lim) } });
+  } catch (err) {
+    console.error('[recicladores.historial]', err);
+    res.status(500).json({ error: 'Error al obtener historial' });
+  }
 }
 
 async function cuentaCobro(req, res) {
-  const id = Number(req.params.id);
-  const { mes, anio } = req.query;
+  try {
+    const id = Number(req.params.id);
+    const a  = Number(req.query.anio) || new Date().getFullYear();
+    const m  = Number(req.query.mes)  || new Date().getMonth() + 1;
+    const inicio = new Date(a, m - 1, 1).toISOString();
+    const fin    = new Date(a, m, 1).toISOString();
 
-  const a = anio ? Number(anio) : new Date().getFullYear();
-  const m = mes ? Number(mes) : new Date().getMonth() + 1;
+    const [{ data: reciclador }, { data: pesajes }] = await Promise.all([
+      supabase.from('recicladores').select('*, rutas!rutaId(*)').eq('id', id).single(),
+      supabase
+        .from('pesajes')
+        .select(`
+          horaEntrada,
+          pesaje_materiales(pesoNeto,
+            materiales!materialId(nombre, precios_material(precio, vigenciaHasta, vigenciaDesde)))
+        `)
+        .eq('recicladorId', id)
+        .gte('horaEntrada', inicio)
+        .lt('horaEntrada', fin)
+        .eq('estado', 'OK'),
+    ]);
 
-  const inicio = new Date(a, m - 1, 1);
-  const fin = new Date(a, m, 1);
+    if (!reciclador) return res.status(404).json({ error: 'Reciclador no encontrado' });
 
-  const reciclador = await prisma.reciclador.findUnique({
-    where: { id },
-    include: { ruta: true },
-  });
-  if (!reciclador) return res.status(404).json({ error: 'Reciclador no encontrado' });
+    let totalKg = 0, totalValor = 0;
+    const detalles = [];
 
-  const pesajes = await prisma.pesaje.findMany({
-    where: { recicladorId: id, horaEntrada: { gte: inicio, lt: fin }, estado: 'OK' },
-    include: {
-      materiales: {
-        include: {
-          material: {
-            include: {
-              precios: {
-                where: { vigenciaHasta: null },
-                orderBy: { vigenciaDesde: 'desc' },
-                take: 1,
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-
-  let totalKg = 0;
-  let totalValor = 0;
-  const detalles = [];
-
-  for (const pesaje of pesajes) {
-    for (const pm of pesaje.materiales) {
-      const precio = pm.material.precios[0]?.precio ?? 0;
-      const kg = Number(pm.pesoNeto);
-      const valor = kg * Number(precio);
-      totalKg += kg;
-      totalValor += valor;
-      detalles.push({
-        fecha: pesaje.horaEntrada,
-        material: pm.material.nombre,
-        kg,
-        precioPorKg: Number(precio),
-        valor,
-      });
+    for (const pesaje of pesajes ?? []) {
+      for (const pm of pesaje.pesaje_materiales ?? []) {
+        const vigente = (pm.materiales?.precios_material ?? [])
+          .filter((p) => !p.vigenciaHasta)
+          .sort((a, b) => new Date(b.vigenciaDesde) - new Date(a.vigenciaDesde))[0];
+        const precio = Number(vigente?.precio ?? 0);
+        const kg = Number(pm.pesoNeto);
+        totalKg    += kg;
+        totalValor += kg * precio;
+        detalles.push({ fecha: pesaje.horaEntrada, material: pm.materiales?.nombre, kg, precioPorKg: precio, valor: kg * precio });
+      }
     }
-  }
 
-  res.json({
-    reciclador: { id: reciclador.id, codigo: reciclador.codigo, nombre: reciclador.nombre },
-    periodo: `${a}-${String(m).padStart(2, '0')}`,
-    totalKg,
-    totalValor,
-    visitas: pesajes.length,
-    detalles,
-  });
+    res.json({
+      reciclador: { id: reciclador.id, codigo: reciclador.codigo, nombre: reciclador.nombre },
+      periodo: `${a}-${String(m).padStart(2, '0')}`,
+      totalKg, totalValor, visitas: (pesajes ?? []).length, detalles,
+    });
+  } catch (err) {
+    console.error('[recicladores.cuentaCobro]', err);
+    res.status(500).json({ error: 'Error al generar cuenta de cobro' });
+  }
 }
 
 module.exports = { listar, obtener, crear, actualizar, historial, cuentaCobro };

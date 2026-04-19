@@ -1,20 +1,18 @@
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
-# Copiar dependencias primero (cache de Docker)
+# Instalar OpenSSL (requerido por Prisma en Linux)
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
 RUN npm ci --only=production
 
-# Copiar schema de Prisma y generar cliente
 COPY prisma ./prisma
 RUN npx prisma generate
 
-# Copiar el resto del código
 COPY src ./src
 
-# Puerto que Railway detecta automáticamente
 EXPOSE 3000
 
-# En producción: aplicar migraciones pendientes y arrancar
 CMD ["sh", "-c", "npx prisma migrate deploy && node src/index.js"]

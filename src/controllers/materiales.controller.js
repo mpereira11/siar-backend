@@ -1,111 +1,144 @@
-const prisma = require('../lib/prisma');
+const supabase = require('../lib/supabase');
+const { invalidate } = require('../lib/cache');
 
 async function listar(_req, res) {
-  const materiales = await prisma.material.findMany({
-    orderBy: { nombre: 'asc' },
-    include: {
-      precios: {
-        where: { vigenciaHasta: null },
-        orderBy: { vigenciaDesde: 'desc' },
-        take: 1,
-      },
-    },
-  });
+  try {
+    const { data, error } = await supabase
+      .from('materiales')
+      .select('id, nombre, codigo, icono, unidad, precios_material(precio, tendencia, vigenciaDesde, vigenciaHasta)')
+      .order('nombre', { ascending: true });
+    if (error) throw error;
 
-  const data = materiales.map((m) => ({
-    id: m.id,
-    nombre: m.nombre,
-    codigo: m.codigo,
-    icono: m.icono,
-    unidad: m.unidad,
-    precio: m.precios[0] ? Number(m.precios[0].precio) : null,
-    tendencia: m.precios[0]?.tendencia ?? 'estable',
-    vigenciaDesde: m.precios[0]?.vigenciaDesde ?? null,
-  }));
-
-  res.json(data);
+    res.json((data ?? []).map((m) => {
+      const vigente = (m.precios_material ?? [])
+        .filter((p) => !p.vigenciaHasta)
+        .sort((a, b) => new Date(b.vigenciaDesde) - new Date(a.vigenciaDesde))[0];
+      return {
+        id: m.id, nombre: m.nombre, codigo: m.codigo, icono: m.icono, unidad: m.unidad,
+        precio:       vigente ? Number(vigente.precio) : null,
+        tendencia:    vigente?.tendencia ?? 'estable',
+        vigenciaDesde: vigente?.vigenciaDesde ?? null,
+      };
+    }));
+  } catch (err) {
+    console.error('[materiales.listar]', err);
+    res.status(500).json({ error: 'Error al listar materiales' });
+  }
 }
 
 async function obtener(req, res) {
-  const id = Number(req.params.id);
-  const material = await prisma.material.findUnique({
-    where: { id },
-    include: {
-      precios: { orderBy: { vigenciaDesde: 'desc' }, take: 12 },
-      compradores: { where: { activo: true } },
-    },
-  });
-
-  if (!material) return res.status(404).json({ error: 'Material no encontrado' });
-  res.json(material);
+  try {
+    const { data, error } = await supabase
+      .from('materiales')
+      .select('*, precios_material(*), compradores(*)')
+      .eq('id', Number(req.params.id))
+      .single();
+    if (error || !data) return res.status(404).json({ error: 'Material no encontrado' });
+    res.json(data);
+  } catch (err) {
+    console.error('[materiales.obtener]', err);
+    res.status(500).json({ error: 'Error al obtener material' });
+  }
 }
 
 async function crear(req, res) {
-  const existe = await prisma.material.findUnique({ where: { codigo: req.body.codigo } });
-  if (existe) return res.status(409).json({ error: `El código ${req.body.codigo} ya existe` });
+  try {
+    const { data: existe } = await supabase
+      .from('materiales').select('id').eq('codigo', req.body.codigo).single();
+    if (existe) return res.status(409).json({ error: `El código ${req.body.codigo} ya existe` });
 
-  const material = await prisma.material.create({ data: req.body });
-  res.status(201).json(material);
+    const { data, error } = await supabase.from('materiales').insert(req.body).select().single();
+    if (error) throw error;
+    invalidate('/api/materiales');
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('[materiales.crear]', err);
+    res.status(500).json({ error: 'Error al crear material' });
+  }
 }
 
 async function actualizarPrecio(req, res) {
-  const id = Number(req.params.id);
-  const { precio, tendencia, vigenciaDesde } = req.body;
+  try {
+    const id = Number(req.params.id);
+    const { precio, tendencia, vigenciaDesde } = req.body;
 
-  const material = await prisma.material.findUnique({ where: { id } });
-  if (!material) return res.status(404).json({ error: 'Material no encontrado' });
+    const { data: material } = await supabase
+      .from('materiales').select('id, nombre').eq('id', id).single();
+    if (!material) return res.status(404).json({ error: 'Material no encontrado' });
 
-  // Cerrar precio anterior
-  await prisma.precioMaterial.updateMany({
-    where: { materialId: id, vigenciaHasta: null },
-    data: { vigenciaHasta: new Date() },
-  });
+    // Cerrar precio anterior
+    await supabase
+      .from('precios_material')
+      .update({ vigenciaHasta: new Date().toISOString() })
+      .eq('materialId', id)
+      .is('vigenciaHasta', null);
 
-  const nuevoPrecio = await prisma.precioMaterial.create({
-    data: {
-      materialId: id,
-      precio,
-      tendencia,
-      vigenciaDesde: vigenciaDesde ? new Date(vigenciaDesde) : new Date(),
-      operadorId: req.user.sub,
-    },
-  });
+    const { data: nuevoPrecio, error } = await supabase
+      .from('precios_material')
+      .insert({
+        materialId:    id,
+        precio,
+        tendencia,
+        vigenciaDesde: vigenciaDesde ? new Date(vigenciaDesde).toISOString() : new Date().toISOString(),
+        operadorId:    req.user.sub,
+      })
+      .select().single();
+    if (error) throw error;
 
-  res.json({ material: { id, nombre: material.nombre }, nuevoPrecio });
+    invalidate('/api/materiales');
+    invalidate('/api/dashboard');
+    res.json({ material: { id, nombre: material.nombre }, nuevoPrecio });
+  } catch (err) {
+    console.error('[materiales.actualizarPrecio]', err);
+    res.status(500).json({ error: 'Error al actualizar precio' });
+  }
 }
 
 async function historialPrecios(req, res) {
-  const id = Number(req.params.id);
-  const material = await prisma.material.findUnique({ where: { id } });
-  if (!material) return res.status(404).json({ error: 'Material no encontrado' });
+  try {
+    const id = Number(req.params.id);
+    const { data: material } = await supabase
+      .from('materiales').select('id, nombre, codigo').eq('id', id).single();
+    if (!material) return res.status(404).json({ error: 'Material no encontrado' });
 
-  const precios = await prisma.precioMaterial.findMany({
-    where: { materialId: id },
-    orderBy: { vigenciaDesde: 'desc' },
-  });
+    const { data: precios } = await supabase
+      .from('precios_material').select('*').eq('materialId', id)
+      .order('vigenciaDesde', { ascending: false });
 
-  res.json({ material: { id, nombre: material.nombre, codigo: material.codigo }, precios });
+    res.json({ material, precios: precios ?? [] });
+  } catch (err) {
+    console.error('[materiales.historialPrecios]', err);
+    res.status(500).json({ error: 'Error al obtener historial' });
+  }
 }
 
 async function listarCompradores(_req, res) {
-  const compradores = await prisma.comprador.findMany({
-    where: { activo: true },
-    include: {
-      material: { select: { id: true, nombre: true, codigo: true, icono: true } },
-    },
-    orderBy: { empresa: 'asc' },
-  });
-
-  res.json(compradores);
+  try {
+    const { data, error } = await supabase
+      .from('compradores')
+      .select('*, materiales!materialId(id, nombre, codigo, icono)')
+      .eq('activo', true)
+      .order('empresa', { ascending: true });
+    if (error) throw error;
+    res.json(data ?? []);
+  } catch (err) {
+    console.error('[materiales.listarCompradores]', err);
+    res.status(500).json({ error: 'Error al listar compradores' });
+  }
 }
 
 async function crearComprador(req, res) {
-  const comprador = await prisma.comprador.create({
-    data: req.body,
-    include: { material: { select: { nombre: true, codigo: true } } },
-  });
-
-  res.status(201).json(comprador);
+  try {
+    const { data, error } = await supabase
+      .from('compradores').insert(req.body)
+      .select('*, materiales!materialId(nombre, codigo)').single();
+    if (error) throw error;
+    invalidate('/api/materiales');
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('[materiales.crearComprador]', err);
+    res.status(500).json({ error: 'Error al crear comprador' });
+  }
 }
 
 module.exports = { listar, obtener, crear, actualizarPrecio, historialPrecios, listarCompradores, crearComprador };

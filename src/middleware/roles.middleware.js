@@ -8,11 +8,7 @@ function requireRoles(...roles) {
       return res.status(401).json({ error: 'No autenticado' });
     }
     if (!roles.includes(req.user.rol)) {
-      return res.status(403).json({
-        error: 'Acceso denegado',
-        requerido: roles,
-        actual: req.user.rol,
-      });
+      return res.status(403).json({ error: 'Acceso denegado' });
     }
     next();
   };

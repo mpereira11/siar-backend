@@ -4,15 +4,17 @@ const authMiddleware = require('../middleware/auth.middleware');
 const { requireRoles } = require('../middleware/roles.middleware');
 const { validate } = require('../middleware/validate.middleware');
 const { crearMaterialSchema, actualizarPrecioSchema, crearCompradorSchema } = require('../validators/materiales.validator');
+const { cacheMiddleware } = require('../lib/cache');
 
 const router = Router();
 
 router.use(authMiddleware);
 
-router.get('/',                    listar);
-router.get('/compradores',         listarCompradores);
-router.get('/:id',                 obtener);
-router.get('/:id/precios',         historialPrecios);
+// Materiales y precios cambian poco — caché de 5 minutos
+router.get('/',                    cacheMiddleware(5 * 60 * 1000), listar);
+router.get('/compradores',         cacheMiddleware(5 * 60 * 1000), listarCompradores);
+router.get('/:id',                 cacheMiddleware(5 * 60 * 1000), obtener);
+router.get('/:id/precios',         cacheMiddleware(2 * 60 * 1000), historialPrecios);
 
 router.post(
   '/',
